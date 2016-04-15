@@ -1,0 +1,84 @@
+---
+title: "GTExExploration"
+author: "Nick Burns"
+date: "15 April 2016"
+output: html_document
+---
+
+# Visualisation and Exploration of Gene expression data  
+## GTEx + R + data.table  
+
+In this analysis we will explore gene expression data, downloaded from GTEx [http://www.gtexportal.org/home/]. As well as being biologically interesting, the GTEx dataset includes gene expression data from more than 7000 samples across 44 tissue types, which makes it a reasonably interesting data problem. It is certainly large enough to require some thought about what may be suitable ways to manipulate and visualise the data.  
+
+This document is organised as follows:  
+
+  1. A description of the analysis and goals.  
+  2. A description of the data, and why we might be motivated to use the data.table package  
+  3. Data wrangling, including:  
+      - filtering the expression data,  
+      - enriching the expression data with interesting meta-data,  
+      - normalisation of the expression data,  
+      - initial visualisation of the expression data  
+  4. Cluster-analysis of the GTEx gene expression data  
+  
+## 1. Introduction  
+
+## 2. The Data  
+
+## 3. Data wrangling  
+
+
+```{r}
+setwd("~/Documents/GitHub/GTExEDA")
+library(data.table)
+
+dataDir <- "/mnt/DataDrive/GTEXData/%s"
+gtexFile <- sprintf(dataDir, "All_Tissue_Site_Details_Analysis.combined.rpkm.gct")
+
+
+gtex <- fread(gtexFile)
+gtex[1:5, 1:7, with = FALSE]
+```
+
+### 3a) extracting genes of interest  
+
+For this analysis, we will focus on a small set of candidate genes. Specifically, we will consider groups of genes which are  known to be highly correlated (within-groups). ABCG2, BRCA1, TPPP and HMGA2 where chosen as our initial candidate genes in each group. For each of these genes, we used the GIANTanalysis tool (giant.princeton.edu) to identify related genes.
+
+In addition, 15 genes were randomly selected from the GTEx dataset such that a total of 40 genes have been selected for this analysis.
+
+```{r}
+targetGenes <- data.table(
+    GeneName = c("ABCG2", "TFP1", "TAL1", "CYP1A1", "ARHGEF12", "FAXDC2", 
+                 "BRCA1", "RBBP8", "BARD1", "H2AFX", "MSH2", 
+                 "TPPP", "TPPP2", "TPPP3", "SLC6A3", "SLC9A3", "TERT", "PICK1", "NEBL",
+                 "HMGA2", "RB1", "IGF2BP2", "SMAD5", "PRMT6", "IGF2BP3"),
+    GeneGroup = factor(c(rep(1, 6), rep(2, 5), rep(3, 8), rep(4, 6)))
+)
+
+# selection of 15 random genes from GTEx  
+idx <- sample(gtex[, Name], 15, replace = FALSE)
+targetGenes <- rbind(targetGenes, 
+                     gtex[Name %in% idx, 
+                          .(GeneName = Description, GeneGroup = 5)])
+targetGenes$GeneName
+```
+
+Now that we have our candidate genes, we will filter the gtex data to these genes only. Whilst it isn't strictly necessary (because the gtex data isn't enormous), we will create a key on the Description column in the gtex data and use this key to filter our results. 
+
+```{r}
+setkey(gtex, Description)
+myGTEx <- gtex[targetGenes[, GeneName]]
+```
+
+### 3b) adding meta-data  
+
+```{r}
+dictFile <- sprintf(dataDir, "GTEx_Data_V6_Annotations_SampleAttributesDS.txt")
+dict <- fread(dictFile)
+```
+
+### 3c) normalisation and visualisation  
+
+## 4. Cluster Analysis  
+
+
