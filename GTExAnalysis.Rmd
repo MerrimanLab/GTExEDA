@@ -29,10 +29,12 @@ This document is organised as follows:
 
 
 ```{r}
-setwd("~/Documents/GitHub/GTExEDA")
+setwd("C:\\Users\\NickBurns\\gitRepositories\\myGits\\GTExEDA")
+#setwd("~/Documents/GitHub/GTExEDA")
 library(data.table)
 
-dataDir <- "/mnt/DataDrive/GTEXData/%s"
+#dataDir <- "/mnt/DataDrive/GTEXData/%s"
+dataDir <- "C:/Users/NickBurns/Downloads/%s"
 gtexFile <- sprintf(dataDir, "All_Tissue_Site_Details_Analysis.combined.rpkm.gct")
 
 
@@ -47,20 +49,22 @@ For this analysis, we will focus on a small set of candidate genes. Specifically
 In addition, 15 genes were randomly selected from the GTEx dataset such that a total of 40 genes have been selected for this analysis.
 
 ```{r}
-targetGenes <- data.table(
-    GeneName = c("ABCG2", "TFP1", "TAL1", "CYP1A1", "ARHGEF12", "FAXDC2", 
-                 "BRCA1", "RBBP8", "BARD1", "H2AFX", "MSH2", 
-                 "TPPP", "TPPP2", "TPPP3", "SLC6A3", "SLC9A3", "TERT", "PICK1", "NEBL",
-                 "HMGA2", "RB1", "IGF2BP2", "SMAD5", "PRMT6", "IGF2BP3"),
-    GeneGroup = factor(c(rep(1, 6), rep(2, 5), rep(3, 8), rep(4, 6)))
-)
-
-# selection of 15 random genes from GTEx  
-idx <- sample(gtex[, Name], 15, replace = FALSE)
-targetGenes <- rbind(targetGenes, 
-                     gtex[Name %in% idx, 
-                          .(GeneName = Description, GeneGroup = 5)])
-targetGenes$GeneName
+# targetGenes <- data.table(
+#     GeneName = c("ABCG2", "TFP1", "TAL1", "CYP1A1", "ARHGEF12", "FAXDC2", 
+#                  "BRCA1", "RBBP8", "BARD1", "H2AFX", "MSH2", 
+#                  "TPPP", "TPPP2", "TPPP3", "SLC6A3", "SLC9A3", "TERT", "PICK1", "NEBL",
+#                  "HMGA2", "RB1", "IGF2BP2", "SMAD5", "PRMT6", "IGF2BP3"),
+#     GeneGroup = factor(c(rep(1, 6), rep(2, 5), rep(3, 8), rep(4, 6)))
+# )
+# 
+# # selection of 15 random genes from GTEx  
+# idx <- sample(gtex[, Name], 15, replace = FALSE)
+# targetGenes <- rbind(targetGenes, 
+#                      gtex[Name %in% idx, 
+#                           .(GeneName = Description, GeneGroup = 5)])
+# targetGenes$GeneName
+# save(targetGenes, file = "targetGenes.Rdata")
+load("targetGenes.Rdata")
 ```
 
 Now that we have our candidate genes, we will filter the gtex data to these genes only. Whilst it isn't strictly necessary (because the gtex data isn't enormous), we will create a key on the Description column in the gtex data and use this key to filter our results. 
@@ -72,13 +76,104 @@ myGTEx <- gtex[targetGenes[, GeneName]]
 
 ### 3b) adding meta-data  
 
+GTEx have provided a data dictionary describing the sample naming convention. The data dictionary is avilable via (http://www.gtexportal.org/home/datasets). 
+
 ```{r}
 dictFile <- sprintf(dataDir, "GTEx_Data_V6_Annotations_SampleAttributesDS.txt")
 dict <- fread(dictFile)
+
+dict <- dict[, .(SAMPID, SMTS, SMTSD)]
+head(dict)
 ```
+
+The SMTS and SMTSD columns provide information about the tissue that each sample was taken from. We will focus on the SMTS column, which provides a slightly coarser categorisation (32 levels, vs. 55 for SMTSD).
+
+Let's look at how many samples we have for each tissue. There is a little wizadry required to plot the bars in decreasing order, so bear with us for the first part.
+
+```{r}
+library(ggplot2)
+
+freqTissues <- table(dict[, SMTS])
+tissueOrder <- names(freqTissues[order(freqTissues, decreasing = FALSE)])
+dict[, SMTS := factor(.SD[,SMTS], levels = tissueOrder, ordered = TRUE)]
+
+ggplot(dict, aes(x = SMTS)) + 
+    geom_bar(fill = "steelblue") + 
+    coord_flip() +
+    theme_bw()
+```
+
+The chart above shows that the tissue categories are massively unbalanced. This is potentially an important observation, for example if we were primarily interested in the spleen then there are very few samples present. Alternatively, if we were performing some form of classification or prediction task, this class imbalance would need to be addressed. However, as this analysis is only exploratory, we should be fine.
 
 ### 3c) normalisation and visualisation  
 
+It is best-practice to normalise read counts before analysis. If we plot the raw read counts for each gene, we can see that they are heavily skewed:
+
+```{r}
+transformData <- function (X, by = "gene", metaCols = c("Name", "Description")) {
+    
+    idxMeta <- which(colnames(X) %in% metaCols)
+    geneNames <- X[, Description]
+    if (by == "gene") {
+        X <- t(X[, -idxMeta, with = FALSE])
+        colnames(X) <- geneNames
+    }
+    
+    return(X)
+}
+setkey(myGTEx, Description)
+myGTEx[head(myGTEx[, Description])][, .(boxplot(transformData(.SD)))]
+```
+
+Quantile normalisation is often used. But here, we will simply log transform the data. We will also add a small constant (k = 1, since this is count data), to offset those samples with a read count of 0 (which we can't take the log of).
+
+```{r}
+myGTEx[head(myGTEx[, Description])][, .(boxplot(log2(transformData(.SD) + 1),
+                                                horizontal = TRUE, las = 1, cex.axis = 0.65))]
+```
+
+Even with such a small set of genes, they are potentially interesting. We can see that ABCG2 is usually lowly-expressed, but there are some samples where ABCG2 is highly expresssed. These would be interesting to try to identify. Similarly, ARHGEF12 is quite highly expressed most of the time, but that there are some samples where it is less highly expressed. And then there is AL513123.1 which is hardly expressed at all. These should be interesting genes to explore.
+
+
 ## 4. Cluster Analysis  
 
+To begin the exploration of these genes, let's simply plot a heatmap. We will start out simple, and then build on the annotations alongside the heatmap as we go.
 
+```{r}
+logTransform <- function (X, metaCols = c("Name", "Description"))  {
+    log2(transformData(X, metaCols = metaCols) + 1)
+}
+myGTEx[, .(heatmap(logTransform(.SD), cexCol = 0.6, Rowv = NA, labRow = NA))]
+```
+
+Based on the above, there seems to be somewhere between 4 and 6 gene clusters, depending on where we cut the tree. It is interesting to note that ARHGEF12, ABCG2 and AL513123.1 all lie in different clusters, which supports our earlier thoughts on the boxplots for these three genes.
+
+Remember, that these genes we specifically chosen such that there would be 4 groups of similar genes, based on the information from the GIANT tool. We might hypothesise then, that these groups should cluster together. Let's add a column colour to the heatmap.
+
+```{r}
+targetGenes[, GeneColour := as.character(factor(GeneGroup, labels = c("darkviolet", "blue", "steelblue", "magenta", "grey")))]
+
+setkey(targetGenes, GeneName)
+myGTEx[, GeneGroup := targetGenes[myGTEx[, Description], GeneColour]]
+head(myGTEx[, .(Description, GeneGroup)])
+
+myGTEx[, .(heatmap(logTransform(.SD, metaCols = c("Name", "Description", "GeneGroup")), cexCol = 0.6, Rowv = NA, labRow = NA,
+                   ColSideColors = .SD[, GeneGroup]))]
+```
+
+The purple, magenta and light blue groups have not clustered strongly. However, the bright blue (cancerous group) and grey (randomly selected) are not so bad. This isn't a complete surprise however. All this really says, is that this very naive approach does not do a good job at replicating the network structure of the GIANT analysis.  
+
+Let us see if the tissues cluster in an interesting way:
+
+```{r}
+setkey(dict, SAMPID)
+metaCols <- c("Name", "Description", "GeneGroup")
+tissueCols <- colnames(myGTEx)[-which(colnames(myGTEx) %in% metaCols)]
+tissueColours <- rainbow(70)[as.integer(as.factor(dict[tissueCols, SMTSD]))]
+head(tissueColours)
+
+myGTEx[, .(heatmap(logTransform(.SD, metaCols = c("Name", "Description", "GeneGroup")), 
+                   cexCol = 0.6, Rowv = NULL, labRow = NA,
+                   ColSideColors = .SD[, GeneGroup],
+                   RowSideColors = tissueColours))]
+```
