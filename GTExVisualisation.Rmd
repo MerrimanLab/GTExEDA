@@ -48,12 +48,12 @@ We will make extensive use of the data.table package throughout this analysis (e
 Read in the raw data file.
 
 ```{r}
-#setwd("C:\\Users\\NickBurns\\gitRepositories\\myGits\\GTExEDA")
-setwd("~/Documents/GitHub/GTExEDA")
+setwd("C:\\Users\\NickBurns\\gitRepositories\\myGits\\GTExEDA")
+#setwd("~/Documents/GitHub/GTExEDA")
 library(data.table)
 
-dataDir <- "/mnt/DataDrive/GTEXData/%s"
-#dataDir <- "C:/Users/NickBurns/Downloads/%s"
+#dataDir <- "/mnt/DataDrive/GTEXData/%s"
+dataDir <- "C:/Users/NickBurns/Downloads/%s"
 gtexFile <- sprintf(dataDir, "All_Tissue_Site_Details_Analysis.combined.rpkm.gct")
 
 
@@ -171,7 +171,7 @@ This doesn't show us much. I suspect that this is because the expression data is
 
 ```{r}
 myGTEx[, sampleCols, with = FALSE][, log2(.SD + 1)][, .(
-    heatmap(t(.SD), labCol = myGTEx[, Description], labRow = NA)
+    heatmap(t(.SD), labCol = myGTEx[, Description], labRow = NA, keep.dendro = FALSE)
 )]
 ```
 
@@ -228,6 +228,15 @@ ggplot(plotGeneLoadings, aes(x = Z, y = loading)) +
     theme(legend.position = "none")
 ```
 
+```{r}
+plotGeneLoadings$GeneColours <- rainbow(10)[cx]
+plotGeneLoadings$Cluster <- cx
+ggplot(plotGeneLoadings, aes(x = reorder(gene, Cluster), y = loading)) +
+    geom_bar(stat = "identity", alpha = 0.7, aes(fill = GeneCluster)) +
+    facet_wrap( ~ Z) + theme_bw() + theme(legend.position = "none")
+    
+```
+
 The plot above shows the strength (size & height of label) of the contribution of each gene on each of the 7 factors. There is reasonable consistency with the heirarchical clustering. Specifically:  
 
   - Z1: large contributions from Cluster(5), and somewhat or Cluster(6). The joint contributions between these two clusters are consistent with their proximity in the dendrogram (neighbouring clusters).  
@@ -238,6 +247,7 @@ The plot above shows the strength (size & height of label) of the contribution o
   - Z6: Clear signlas from VAMP3, H2AFX and VAMP3 - all off which are quite interesting genes (refer back to the heatmap).  
   - Z7: this factor agains seems to be dominated by Cluster(4), which includes genes from the BRCA1 gene family. There is potentially a contrast here between the BRCA1 family and the TPPP family, though I may be stretching things a bit here :)  
   
+
 Overall however, there is good consistency between the heirarchical clustering and the factor analysis. The factor analysis revealed some itneresting patterns (for example, Z4 and Z1) which may hint at interesting tissue-specific (biologically relevant?) patterns in the underlying data. 
 
   
