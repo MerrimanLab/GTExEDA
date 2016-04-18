@@ -29,12 +29,12 @@ This document is organised as follows:
 
 
 ```{r}
-setwd("C:\\Users\\NickBurns\\gitRepositories\\myGits\\GTExEDA")
-#setwd("~/Documents/GitHub/GTExEDA")
+#setwd("C:\\Users\\NickBurns\\gitRepositories\\myGits\\GTExEDA")
+setwd("~/Documents/GitHub/GTExEDA")
 library(data.table)
 
-#dataDir <- "/mnt/DataDrive/GTEXData/%s"
-dataDir <- "C:/Users/NickBurns/Downloads/%s"
+dataDir <- "/mnt/DataDrive/GTEXData/%s"
+#dataDir <- "C:/Users/NickBurns/Downloads/%s"
 gtexFile <- sprintf(dataDir, "All_Tissue_Site_Details_Analysis.combined.rpkm.gct")
 
 
@@ -103,7 +103,7 @@ ggplot(dict, aes(x = SMTS)) +
     theme_bw()
 ```
 
-The chart above shows that the tissue categories are massively unbalanced. This is potentially an important observation, for example if we were primarily interested in the spleen then there are very few samples present. Alternatively, if we were performing some form of classification or prediction task, this class imbalance would need to be addressed. However, as this analysis is only exploratory, we should be fine.
+The chart above shows that the tissue categories are massively unbalanced. This is worth keeping in mind as we go.
 
 ### 3c) normalisation and visualisation  
 
@@ -169,7 +169,7 @@ Let us see if the tissues cluster in an interesting way:
 setkey(dict, SAMPID)
 metaCols <- c("Name", "Description", "GeneGroup")
 tissueCols <- colnames(myGTEx)[-which(colnames(myGTEx) %in% metaCols)]
-tissueColours <- rainbow(70)[as.integer(as.factor(dict[tissueCols, SMTSD]))]
+tissueColours <- rainbow(40)[as.integer(as.factor(dict[tissueCols, SMTS]))]
 head(tissueColours)
 
 myGTEx[, .(heatmap(logTransform(.SD, metaCols = c("Name", "Description", "GeneGroup")), 
@@ -177,3 +177,81 @@ myGTEx[, .(heatmap(logTransform(.SD, metaCols = c("Name", "Description", "GeneGr
                    ColSideColors = .SD[, GeneGroup],
                    RowSideColors = tissueColours))]
 ```
+
+I am not convinced that this heatmap is yielding much of interest. As a final effort on this full dataset, let's consider using factor analysis. For the factor analysis, we will analyse the expression profiles of genes. Ideally, we should see similar expression patterns loading onto the same factors.
+
+```{r}
+fData <- logTransform(myGTEx, metaCols = c("Name", "Description", "GeneGroup"))
+head(fData[, 1:10])
+
+results <- factanal(fData, factors = 7)
+results
+```
+
+An effort to visualise these using parallel coordinates:
+
+```{r}
+fLoadings <- fData %*% results$loadings
+
+dict[, SMTSColours := rainbow(40)[as.integer(.SD[, SMTS])]]
+fColours <- dict[rownames(fLoadings), SMTSColours]
+MASS::parcoord(fLoadings, col = scales::alpha(fColours, 0.1))
+```
+
+Just for interest, let's compare the factor loadings with unrotated principal components:
+
+```{r}
+pca <- prcomp(fData)
+
+par(mfrow = c(2, 1))
+MASS::parcoord(fLoadings, col = scales::alpha(fColours, 0.05), main = "Factor Loadings")
+MASS::parcoord(pca$x[, 1:10], col = scales::alpha(fColours, 0.05), main = "PCA Loadings")
+
+par(mfrow = c(1, 1))
+```
+
+
+
+These are definitely nice and colourful plots. But, I think we are being overwhelmed by the imbalanced tissue sampling. Let's pay more attention to the gene loadings:
+
+```{r}
+plotGeneLoadings <- data.frame(Z = rep(1:7, each = 40), 
+                               loading = results$loadings[1:280], 
+                               gene = rep(myGTEx[, Description], 7))
+ggplot(plotGeneLoadings, aes(x = Z, y = loading)) +
+    geom_text(aes(label = gene, size = loading**2)) +
+    theme_bw() +
+    ggtitle("Strength of gene loading by factor")
+```
+
+A tentative interpretation of these loadings might be:  
+
+  - Z1: strong signal from the cancer genes (BRCA1 group).  
+  - Z2: potentially a contrast between the TPPP and ABCG2 groups with the BARD1 gene.  
+  - z3: Strong signal from TPPP2, and less so from it's group-mate TERT.  
+  - z4: Strong signal from SMAD5 and ARHGEF12. No clear contrast of grouping of gene families.  
+  - z5: Claer signal from the HMGA2 group of genes, contrasting with the TPPP group (PICK1, TPPP3, SCL6A3 genes).   
+  - z6: Some signal from the ABCG2 group of genes.  
+  - z7: The height family of genes are represented, somewhat contrasted with TPPP group.  
+  
+These are tentative interpretations at best. Mapping these interpretations back to the parallel coordinate plots is not obvious.
+
+Parallel coords by tissue type
+```{r}
+byTissue <- as.data.table(fLoadings)
+byTissue[, Tissue := dict[rownames(fLoadings), SMTS]]
+head(byTissue)
+
+par(mfrow = c(7, 4))
+for (i in 1:25) {
+    tx <- unique(byTissue[, Tissue])[i]
+    print(sprintf("%s:  %s", as.character(tx), nrow(byTissue[Tissue == tx])))
+    if (nrow(byTissue[Tissue == tx]) > 0) {
+        MASS::parcoord(byTissue[Tissue == tx, 1:7, with = F], main = tx,
+                       col = scales::alpha("steelblue", 0.2))
+    }
+}
+par(mfrow = c(1, 1))
+```
+
+I just don't think we are seeing anything interesting here :( more thought is required - definitely. What this is saying, is that I cannot start making interesting comparisons between genes based solely on the boxplots that we see on the GTEx portal.
