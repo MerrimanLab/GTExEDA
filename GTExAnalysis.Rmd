@@ -16,6 +16,9 @@ NOTE: this is the reduced 40-gene set
 ```{r}
 setwd("C:\\Users\\NickBurns\\gitRepositories\\myGits\\GTExEDA")
 #setwd("~/Documents/GitHub/GTExEDA")
+#dataDir <- "/mnt/DataDrive/GTEXData/%s"
+dataDir <- "C:/Users/NickBurns/Downloads/%s"
+
 library(data.table)
 
 load("targetGenes.Rdata")
@@ -94,3 +97,31 @@ This is really interesting - the random forest is able to do very well with only
   1. Use k-fold cross validation to confirm the accuracy  
   2. Visualise somehow the way that these tissues are contributing to the prediction of gene clusters (I suspect that only 1 or 2 tissues are dominating a cluster, and this might be a tentative guide to differential expression (at least in a predictve sense)).  
   3. PLAY!
+  
+  
+Let's see if the top 100 features can yield similar gene loadings via factor analysis:
+
+```{r}
+getFeatures <- function (K) {
+    which(colnames(myGTEx) %in% names(features)[1:K])
+}
+fData <- myGTEx[, getFeatures(4000), with = FALSE][, t(.SD)]
+colnames(fData) <- myGTEx[, Description]
+head(fData[, 1:10])
+
+fit <- factanal(fData, factors = 7)
+
+
+NGenes <- 40
+plotGeneLoadings <- data.frame(Z = rep(1:7, each = NGenes), 
+                               loading = fit$loadings[1:(7 * NGenes)], 
+                               gene = rep(myGTEx[, Description], 7))
+
+ggplot(plotGeneLoadings, aes(x = Z, y = loading)) +
+    geom_text(aes(label = gene, size = loading**2)) +
+    theme_bw() +
+    ggtitle("Strength of gene loading by factor") +
+    theme(legend.position = "none")
+```
+
+2600 (K = 2600) was the fewest features that would result in convergence. At this level, the clusters were definitely messy. At K = 4000, the clusters were sensible again. This is interesting, it indicates that we can throw out approx. half the tissue samples (not sure which ones...), but that there is a fair level of complexity to the correlation in gene expressions necessary to distinguish the clusters. 
