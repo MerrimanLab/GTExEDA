@@ -229,10 +229,11 @@ ggplot(plotGeneLoadings, aes(x = Z, y = loading)) +
 ```
 
 ```{r}
+cx <- cutree(model, k = 8)
 plotGeneLoadings$GeneColours <- rainbow(10)[cx]
 plotGeneLoadings$Cluster <- cx
 ggplot(plotGeneLoadings, aes(x = reorder(gene, Cluster), y = loading)) +
-    geom_bar(stat = "identity", alpha = 0.7, aes(fill = GeneCluster)) +
+    geom_bar(stat = "identity", alpha = 0.7, aes(fill = GeneColours)) +
     facet_wrap( ~ Z) + theme_bw() + theme(legend.position = "none")
     
 ```
@@ -261,3 +262,52 @@ If there is one downside to the data.table package, it is that I find the syntax
 
 The analysis itself was somewhat interesting. We identified a number of gene clusters and were able to confirm these clusters using two different methods (heirarchical clustering and factor analysis). Are these gene clusters biologically relevant? I have no idea. But it seems likely that the imbalance in tissue samples is an issue that should be considered carefully.
 
+
+## Tissue predictions  
+
+This is really interesting... Using the factor loadings before, we will find the maximal loading for each tiisue and then investigate if there are trends in the types of tissue loading on each factor. As a quick exmaple, I wil look at factor 2 and 6 (loosely these are the ABCG2 factors):
+
+```{r}
+dim(fData)
+dim(fit$loadings)
+loadTissues <- fData %*% fit$loadings
+
+tissueMax <- apply(loadTissues, 1, which.max)
+head(tissueMax)
+
+# number of tissues loading per factor:
+unlist(lapply(1:7, function (x) sum(tissueMax == x)))
+
+# tissue types on factor 2:
+key(dict)
+plot(log(table(dict[names(tissueMax)[tissueMax == 2], SMTS])),
+     las = 3, ylab = "log(N)")
+
+# tissue types on factor 6:
+plot(table(dict[names(tissueMax)[tissueMax == 6], SMTS]),
+     las = 3, ylab = "log(N)")
+```
+
+Cool! Now, let's look at all of the factors:
+
+```{r}
+setkey(dict, SAMPID)
+par(mfrow = c(4, 2))
+
+for (x in 1:7) {
+    
+    plot(log2(table(
+        dict[names(tissueMax)[tissueMax == x], SMTS]
+    ) + 1), las = 3, ylab = "log2(N)", main = sprintf("Factor %s", x))
+}
+
+par(mfrow =c(1, 1))
+
+```
+
+This is great - and there is some sense in this.   
+
+  - Factor 2 is largely ABCG2-family genes, and there is a high liver content  
+  - Factor 6 includes strong contributions from TALI and FAXDC2 which are both in the ABCG2-family, and there is a high liver contribution here. 
+  - Although not part of the BRCA1-family (breast cancer) of genes, it is worth noting that TAL1 has clustered strongly with BRCA1 and BARD1, and this perhaps explains the high breast effect on Factor 6.  
+  - Factor 1 is a mess. I am not sure this tells us anything. 
