@@ -1,0 +1,63 @@
+---
+title: "eQTL_EDA"
+author: "Nick Burns"
+date: "2 May 2016"
+output: html_document
+---
+
+I have finally downloaded all tissue-specific eQTL data from GTEx (http://www.gtexportal.org/home/datasets). There are 44 cell types, and over 100 GB of compressed data. Having extracted a few files, it looks like roughyl 4x compression. My hope is that the files have a defined and consistent schema. Here, I will look at a few of them and begin to think about a suitable database schema.
+
+```{r}
+setwd("~/Documents/GitHub/GTExEDA/eQTL/")
+dataDir <- "/mnt/DataDrive/GTEXData/%s"
+
+library(data.table)
+
+eQTLFiles <- list.files(sprintf(dataDir, ""), pattern = "eQTLs.txt$")  # note $ character indicates "ends with"
+
+eQTLdata <- list()
+for (x in 1:4) {
+    
+    fx <- eQTLFiles[x]
+    
+    tmp <- fread(sprintf(dataDir, fx))
+    print("")
+    print(sprintf("------  %s ------", fx))
+    print(dim(fx))
+    print("")
+    
+    eQTLdata[[x]] <- head(tmp, 100)
+}
+eQTLdata <- rbindlist(eQTLdata)
+dim(eQTLdata)
+
+#save(eQTLdata, file = "eQTLdata_samples.Rdata")
+```
+
+Good news: there seems to be a consistent format to these files (gene, SNP, beta, t-stat, p-value).  
+
+The bad news: they don't use RSIDs. Damn it! I will need to create a mapping between RSIDs and this format.
+
+Looks like, all up, there will be approx. 5 billion rows. That's not too bad really.
+
+## The columns.
+
+These are quite self-explanatory, but let's be proper about this:  
+
+  - gene: these look like Ensembl IDs   
+  - SNP: these are odd identifiers, need to ask murray about these  
+  - beta: the parameter estimate for marginal snp effect  
+  - t-stat: the relevant t-statistic (used to create the p-value)  
+  - p-value: exactly what it says.  
+
+
+## TO DO:  
+
+    1. map gene ids with common gene names  
+    2. map SNP names here with RSIDs  
+    3. include chromosome and positions  
+    4. include cell types  
+    5. include tissue types (higher abstraction than cell types)  
+    6. normalise this as much as possible - it would be really really good if I could keep the final DW quite small.  
+    
+
