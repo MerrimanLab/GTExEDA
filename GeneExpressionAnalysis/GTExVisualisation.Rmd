@@ -1,0 +1,313 @@
+---
+title: "GeneExpressionVisualisations"
+author: "Nick Burns"
+date: "18 April 2016"
+output: html_document
+---
+
+In this analysis we will explore gene expression data, downloaded from GTEx [http://www.gtexportal.org/home/]. As well as being biologically interesting, the GTEx dataset includes gene expression data from more than 7000 samples across 44 tissue types, which makes it a reasonably interesting data problem. It is certainly large enough to require some thought about what may be suitable ways to manipulate and visualise the data.  
+
+This document is organised as follows:  
+
+  1. Introduction: about the analysis, about the data, and motivation for using data.table   
+  2. Data wrangling, including:  
+      - filtering the expression data,  
+      - enriching the expression data with interesting meta-data,  
+      - normalisation of the expression data,  
+      - initial visualisation of the expression data  
+  3. Cluster-analysis of the GTEx gene expression data  
+  4. Final thoughts  
+  
+## 1. Introduction  
+
+Our primary goal is to explore the data.table package. Here, we use it to analyse a set of gene expression data to identify clusters of genes which exhibit high within-cluster similarity as well as being dissimilar to other clusters. All data was downloaded from the GTEx dataset portal and is described below:  
+
+**Gene expression data**  
+  - download file name: GTEx_Analysis_v6_RNA-seq_RNA-SeQCv1.1.8_gene_rpkm.gct.gz  
+  - data file name: All_Tissue_Site_Detail_Analysis.combined.rpkm.gct  
+  - size: 1.9 GB compressed, 4.7 GB uncompressed  
+  - Gene expression levels are recorded in reads per kilobase of transcript per million mapped reads (RPKM), and have not been normalised any further.  
+  - The data file consists of 56318 genes (rows) across 8555 tissue samples (columns)  
+  
+**Data dictionary**  
+  - file name: GTEx_Data_V6_Annotations_SampleAttributesDS.txt  
+  - size: 5.9 MB  
+  - Provides detailed information about the sample annotations (i.e. the naming convention used to name the columns in the gene expression data)  
+  
+**Target genes**  
+In this analysis, we will specifically focus on a set of 40 genes. These are loosely grouped into 4 gene families, where we originally selected ABCG2, TPPP, BRCA1 and HMGA2 as the initial seeds for these families. For each of these seeds, we browsed the GIANT Analysis too (http://giant.princeton.edu/) and used this add aprox. 5 more, closely related genes to each family. In addition, a 5th group was randomly selected from the GTEx data.
+
+We hypothesise, that each gene family should cluster together, and that the randomly selected genes are unlikely to cluster strongly with any of the gene families.  
+
+**Data.table**  
+We will make extensive use of the data.table package throughout this analysis (even where it may not be sensible to do so). The size of the gene expression datatset (4.7 GB) precludes the use of typical data frames. In addition, the need to subset, filter, sort and join the gene expression data *and* the metadata seems like an ideal use-case for the data.table package.  
+
+
+## 2. Data wrangling   
+
+Read in the raw data file.
+
+```{r}
+setwd("C:\\Users\\NickBurns\\gitRepositories\\myGits\\GTExEDA")
+#setwd("~/Documents/GitHub/GTExEDA")
+library(data.table)
+
+#dataDir <- "/mnt/DataDrive/GTEXData/%s"
+dataDir <- "C:/Users/NickBurns/Downloads/%s"
+gtexFile <- sprintf(dataDir, "All_Tissue_Site_Details_Analysis.combined.rpkm.gct")
+
+
+gtex <- fread(gtexFile)
+gtex[1:5, 1:7, with = FALSE]
+```
+
+### 2a) extracting genes of interest  
+
+In this anlaysis we will focus on 40 genes of interest, described in detail in section 1. The target gene set was previously created and is saved in "targetGene.Rdata".
+
+```{r}
+# targetGenes <- data.table(
+#     GeneName = c("ABCG2", "TFP1", "TAL1", "CYP1A1", "ARHGEF12", "FAXDC2", 
+#                  "BRCA1", "RBBP8", "BARD1", "H2AFX", "MSH2", 
+#                  "TPPP", "TPPP2", "TPPP3", "SLC6A3", "SLC9A3", "TERT", "PICK1", "NEBL",
+#                  "HMGA2", "RB1", "IGF2BP2", "SMAD5", "PRMT6", "IGF2BP3"),
+#     GeneGroup = factor(c(rep(1, 6), rep(2, 5), rep(3, 8), rep(4, 6)))
+# )
+# 
+# # selection of 15 random genes from GTEx  
+# idx <- sample(gtex[, Name], 15, replace = FALSE)
+# targetGenes <- rbind(targetGenes, 
+#                      gtex[Name %in% idx, 
+#                           .(GeneName = Description, GeneGroup = 5)])
+# targetGenes$GeneName
+# save(targetGenes, file = "targetGenes.Rdata")
+load("targetGenes.Rdata")
+targetGenes
+```
+
+Now that we have our candidate genes, we will filter the gtex data to these genes only. I imagine that we could continue to work with the full GTEx dataset quite comfortably. But I am always in favour of turning *'big' data problems* into *'small' data problems* as early as possible.
+
+To make the filtering quicker, we will create a key on the Description column of the GTEx data. If this dataset was much larger, this would greatly improve the filtering below (here it makes no noticeable difference).
+
+```{r}
+setkey(gtex, Description)
+myGTEx <- gtex[targetGenes[, GeneName]]
+```
+
+### 3b) adding meta-data  
+
+GTEx have provided a data dictionary describing the sample naming convention. We will read this in and restrict it to the columns of interest.
+
+```{r}
+dictFile <- sprintf(dataDir, "GTEx_Data_V6_Annotations_SampleAttributesDS.txt")
+dict <- fread(dictFile)
+
+dict <- dict[, .(SAMPID, SMTS, SMTSD)]
+head(dict)
+```
+
+The SMTS and SMTSD columns provide information about the tissue that each sample was taken from. 
+
+Let's look at how many samples we have for each tissue. There is a little wizadry required to plot the bars in decreasing order, so bear with us for the first part.
+
+```{r}
+library(ggplot2)
+
+freqTissues <- table(dict[, SMTS])
+tissueOrder <- names(freqTissues[order(freqTissues, decreasing = FALSE)])
+dict[, SMTS := factor(.SD[,SMTS], levels = tissueOrder, ordered = TRUE)]
+
+ggplot(dict, aes(x = SMTS)) + 
+    geom_bar(fill = "steelblue") + 
+    coord_flip() +
+    theme_bw()
+```
+
+The chart above shows that the tissue categories are massively unbalanced. This is worth keeping in mind as we go.
+
+## Gene expression profiles  
+
+As our first example, we will try to recreate the gene expression plot for gene TPPP (see http://www.gtexportal.org/home/gene/TPPP).
+
+```{r}
+setkey(dict, SAMPID)
+setkey(myGTEx, Description)
+
+
+getGeneProfile <- function (geneName = NULL) {
+    
+    sampleIDs <- colnames(gtex)[-c(1:2)]
+    profile <- dict[sampleIDs, .(SMTSD, SMTS)]
+    profile[, RPKM := t(myGTEx[geneName,
+                             which(colnames(myGTEx) %in% sampleIDs),
+                             with = FALSE])]
+    profile[, Gene := geneName]
+    
+    
+    return (profile)
+}
+
+showGenes <- c("TPPP", "ABCG2", "BRCA1", "HMGA2")
+plotGenes <- rbindlist(lapply(showGenes, getGeneProfile))
+ggplot(plotGenes, aes(x = SMTSD, y = RPKM)) +
+    geom_boxplot(aes(colour = colorRamps::primary.colors(50)[SMTS])) +
+    facet_wrap( ~ Gene, scales = "free_y") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "none")
+```
+
+
+This is great - these plots are exactly like those on the GTEx website. Using this, we could investigate which genes are similar to one another:  
+
+```{r}
+sampleCols <- which(colnames(myGTEx) %in% colnames(myGTEx)[-c(1:2)])
+myGTEx[, sampleCols, with = F][, .(heatmap(as.matrix(.SD),
+                                           labRow = myGTEx[, Description],
+                                           labCol = NA))]
+```
+
+This doesn't show us much. I suspect that this is because the expression data is strongly right skewed. We can use data.table to log normalise the data & replot:
+
+```{r}
+myGTEx[, sampleCols, with = FALSE][, log2(.SD + 1)][, .(
+    heatmap(t(.SD), labCol = myGTEx[, Description], labRow = NA, keep.dendro = FALSE)
+)]
+```
+
+This is much better. There are some potential gene clusters here, soething like:  
+
+  - TFP1, TPPP, ABCG2, SFXN5  
+  - SMAD5, RB1, RBBP8, MSH2, PRMT6  
+  - TAL1, BRCA1, BARD1, ZNF184  
+  - HMGA2, IGF2BP3  
+  - TPPP3 is way out by itself, and TPPP2 is odd with one highly localised bright block.
+  
+Let's be more explicit by building a heirarchical model and cutting this to produce our gene clusters:  
+
+```{r}
+model <- hclust(dist(myGTEx[, sampleCols, with = F][, log2(.SD + 1)]))
+plot(model, labels = myGTEx[, Description])
+```
+
+Above, we have reproduced the gene clusters from the heatmap using the hclust() function with default parameters. The dendrogram above gives us a better view of the gene clusters. Notably, the randomly selected genes are almost entirely within their own group to the far right. I am going to define 8 gene clusters, and use cutree() to get these:
+
+```{r}
+geneClusters <- data.table(GeneName = myGTEx[, Description],
+                           Cluster = cutree(model, k = 8))
+geneClusters[order(Cluster)]
+```
+
+### Factor analysis  
+
+The goal here is to see if the gene clusters above can be reproduced using factor analysis. If these clusters are meaningful, we should see these clusters of genes loading heavily on hopefully only 1 factor.
+
+Below, we will log transform and transpose the expression data before performing the factor analysis:
+
+```{r}
+fData <- myGTEx[, sampleCols, with = FALSE][, t(log2(.SD + 1))]
+colnames(fData) <- myGTEx[, Description]
+head(fData[, 1:10])
+
+fit <- factanal(fData, factors = 7)
+fit
+```
+
+And now if we explore the factor loadings:
+
+```{r}
+NGenes <- 40
+plotGeneLoadings <- data.frame(Z = rep(1:7, each = NGenes), 
+                               loading = fit$loadings[1:(7 * NGenes)], 
+                               gene = rep(myGTEx[, Description], 7))
+
+ggplot(plotGeneLoadings, aes(x = Z, y = loading)) +
+    geom_text(aes(label = gene, size = loading**2)) +
+    theme_bw() +
+    ggtitle("Strength of gene loading by factor") +
+    theme(legend.position = "none")
+```
+
+```{r}
+cx <- cutree(model, k = 8)
+plotGeneLoadings$GeneColours <- rainbow(10)[cx]
+plotGeneLoadings$Cluster <- cx
+ggplot(plotGeneLoadings, aes(x = reorder(gene, Cluster), y = loading)) +
+    geom_bar(stat = "identity", alpha = 0.7, aes(fill = GeneColours)) +
+    facet_wrap( ~ Z) + theme_bw() + theme(legend.position = "none")
+    
+```
+
+The plot above shows the strength (size & height of label) of the contribution of each gene on each of the 7 factors. There is reasonable consistency with the heirarchical clustering. Specifically:  
+
+  - Z1: large contributions from Cluster(5), and somewhat or Cluster(6). The joint contributions between these two clusters are consistent with their proximity in the dendrogram (neighbouring clusters).  
+  - Z2: strong contributions from the genes in Cluster(1). Interestingly, there is also a contrast between these genes and BARD1 which might account for the strong groupings (dissimilarity) between these clusters in the dendrogram.  
+  - Z3: almost exclusively the randomly selected genes of Cluster(2).  
+  - Z4: unsure  
+  - Z5: Strong cotnributions from HMGA2, IGF2BP3 and IGFBP2. These are in different clusters in the dendrogram, but the grouping on factor 5 is consistent with the gene family identified from the GIANT tool. This is interesting, and hints at some underlying correlation in the gene expression.  
+  - Z6: Clear signlas from VAMP3, H2AFX and VAMP3 - all off which are quite interesting genes (refer back to the heatmap).  
+  - Z7: this factor agains seems to be dominated by Cluster(4), which includes genes from the BRCA1 gene family. There is potentially a contrast here between the BRCA1 family and the TPPP family, though I may be stretching things a bit here :)  
+  
+
+Overall however, there is good consistency between the heirarchical clustering and the factor analysis. The factor analysis revealed some itneresting patterns (for example, Z4 and Z1) which may hint at interesting tissue-specific (biologically relevant?) patterns in the underlying data. 
+
+  
+## Final thoughts  
+
+First and foremost, this analysis was an excuse to play with the data.table package. There were aspects of data.table which I liked. Namely, the ability to read in large files (5 GB in this case) and the ability to very quickyl subset and manipulate data (even large data sets) within the data table. We were even able to speed this up, and simplify the syntax, by creating keys on appropriate columns.  
+
+The idea of "chaining" operations together was interesting. Specifically, I liked the ability to chain together a sensible sequence (e.g. subset, then normalise, then do something). Chaining in this way also made more complex operations (like creating the heatmap) more efficient and slightly more readable.
+
+If there is one downside to the data.table package, it is that I find the syntax quite dense. Especially as you begin to build more complex workflows, or need / want to set parameters in your function calls (e.g. the heatmap). Building longer chains, each with more atomic operations helped with the readability. The other issue here is that chaining returns not only the output (e.g. the plot), but also the final data table. This is slightly annoying, if it is just the output that you are after (for example the fitted model from factanal, or a plot object).
+
+The analysis itself was somewhat interesting. We identified a number of gene clusters and were able to confirm these clusters using two different methods (heirarchical clustering and factor analysis). Are these gene clusters biologically relevant? I have no idea. But it seems likely that the imbalance in tissue samples is an issue that should be considered carefully.
+
+
+## Tissue predictions  
+
+This is really interesting... Using the factor loadings before, we will find the maximal loading for each tiisue and then investigate if there are trends in the types of tissue loading on each factor. As a quick exmaple, I wil look at factor 2 and 6 (loosely these are the ABCG2 factors):
+
+```{r}
+dim(fData)
+dim(fit$loadings)
+loadTissues <- fData %*% fit$loadings
+
+tissueMax <- apply(loadTissues, 1, which.max)
+head(tissueMax)
+
+# number of tissues loading per factor:
+unlist(lapply(1:7, function (x) sum(tissueMax == x)))
+
+# tissue types on factor 2:
+key(dict)
+plot(log(table(dict[names(tissueMax)[tissueMax == 2], SMTS])),
+     las = 3, ylab = "log(N)")
+
+# tissue types on factor 6:
+plot(table(dict[names(tissueMax)[tissueMax == 6], SMTS]),
+     las = 3, ylab = "log(N)")
+```
+
+Cool! Now, let's look at all of the factors:
+
+```{r}
+setkey(dict, SAMPID)
+par(mfrow = c(4, 2))
+
+for (x in 1:7) {
+    
+    plot(log2(table(
+        dict[names(tissueMax)[tissueMax == x], SMTS]
+    ) + 1), las = 3, ylab = "log2(N)", main = sprintf("Factor %s", x))
+}
+
+par(mfrow =c(1, 1))
+
+```
+
+This is great - and there is some sense in this.   
+
+  - Factor 2 is largely ABCG2-family genes, and there is a high liver content  
+  - Factor 6 includes strong contributions from TALI and FAXDC2 which are both in the ABCG2-family, and there is a high liver contribution here. 
+  - Although not part of the BRCA1-family (breast cancer) of genes, it is worth noting that TAL1 has clustered strongly with BRCA1 and BARD1, and this perhaps explains the high breast effect on Factor 6.  
+  - Factor 1 is a mess. I am not sure this tells us anything. 

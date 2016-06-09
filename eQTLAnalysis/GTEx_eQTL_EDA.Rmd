@@ -1,0 +1,60 @@
+---
+title: "GTEx_eQTL_EDA"
+author: "Nick Burns"
+date: "9 June 2016"
+output: html_document
+---
+
+# Exploratory Analysis of GTEx eQTL data  
+
+```{r}
+setwd("~/Documents/GitHub/GTExEDA")
+data_dir <- "/mnt/DataDrive/gEXPR_eQTL_Datasets/GTEXData/%s"
+
+library(data.table)
+```
+
+## A first look at the data  
+
+Let's begin really simply and look at a data file. Note that these are quite large files, so I am not going to go all out on them yet.
+
+```{r}
+cerebellum <- fread(sprintf(data_dir, "Brain_Cerebellar_Hemisphere_Analysis_cis-eQTLs.txt"))
+
+cerebellum
+dim(cerebellum)
+```
+
+I have dipped into a few of these files previously, and they all have exactly the same format which is fantastic. What we have is: 
+
+  - an Ensembl ID for each gene,  
+  - some SNP identifier, which looks like it is: <CHR>_<POS>_<A1>_<A2>_<genome build>,  
+  - a beta-value (significance of an eQTL or not)  
+  - the relevant t-statistic,  
+  - and the p-value  
+  
+There are some really positive things here. First, the SNPs are identified by chromosome and position, where the position is based on build 37 of the human genome. This is incredibly positive, it means we can base all analyses / lookups directly on genomic coordinates which makes life a little easier (more generic). Second, the t-stat is probably the most useful thing here - as this gives us a pretty robust z-statistic to work with that we may be able to play with a little. We shall see.
+
+## Visualising regions  
+
+Let's pick a gene and visualise the data a little. I have no idea what genes the Ensembl IDs map to, but let's just pick one.
+
+```{r}
+tmp <- cerebellum[gene == "ENSG00000079974.13"]
+tmp[, CHR := strsplit(SNP, "_")[[1]][1]]
+tmp[, POS := as.integer(strsplit(SNP, "_")[[1]][2]), by = "SNP"]
+colnames(tmp) <- c("gene", "SNP", "beta", "tstat", "pvalue", "chr", "pos")
+
+tmp
+
+par(mfrow = c(2, 1))
+
+tmp[, .(plot(pos/1000000, -log10(pvalue), main = "pvalues", col = scales::alpha("dodgerblue", 0.3), pch = 19, type = "b"))]
+tmp[, .(plot(pos/1000000, tstat, main = "tstats", col = scales::alpha("dodgerblue", 0.3), pch = 19, type = "b"))]
+
+par(mfrow = c(1, 1))
+```
+
+I copied the Ensembl ID (just the first part, not the .13 part) into Ensembl's search box, and it turns out this gene is RABL2B. I then used GLIDA::fromUCSCEnsemblGenes to find out that the transcription start site for this gene is at position 51205928. We can see the increase in significant eQTLs around this position.
+
+Whilst the transcription start site (from glida) matches well with the enriched eQTL signal, as we expect it should, I have to do more work to confirm the exact mappign of positions. I will have to be careful to get this right...
