@@ -19,7 +19,7 @@ library(data.table)
 Let's begin really simply and look at a data file. Note that these are quite large files, so I am not going to go all out on them yet.
 
 ```{r}
-cerebellum <- fread(sprintf(data_dir, "Brain_Cerebellar_Hemisphere_Analysis_cis-eQTLs.txt"))
+cerebellum <- fread(sprintf(data_dir, "eQTL/Brain_Cerebellar_Hemisphere_Analysis_cis-eQTLs.txt"))
 
 cerebellum
 dim(cerebellum)
@@ -58,3 +58,126 @@ par(mfrow = c(1, 1))
 I copied the Ensembl ID (just the first part, not the .13 part) into Ensembl's search box, and it turns out this gene is RABL2B. I then used GLIDA::fromUCSCEnsemblGenes to find out that the transcription start site for this gene is at position 51205928. We can see the increase in significant eQTLs around this position.
 
 Whilst the transcription start site (from glida) matches well with the enriched eQTL signal, as we expect it should, I have to do more work to confirm the exact mappign of positions. I will have to be careful to get this right...
+
+## Thoughts and potential questions  
+
+Here we have briefly looked at the eQTLs for RABL2B in the cerrebellum. Technicaly, none of the eQTLs reach significance once adjusted for multiple testing (assuming the 0.05 / 200000 described in the GTEx Consortium's paper, but which seems a little liberal looking at this data). Despite this however, it would be fair to say there is a visual pattern where the t-stats are more extreme near the TSS.
+
+Using the GTEx data, there are a number of questions we might ask:  
+
+  - for gene, G1, which tissues show significant eQTLs?  
+  - do all genes exhibit this 'enrichment' of extreme tstats near the TSS?  
+  - perhaps more interestingly, are there genes which have significant, or near significant, eQTLs futher away from the TSS?  
+  - should we consider some sort of Wilcoxon rank test (or something similar) to interrogate the pattern of tstats as opposed to the pattern of significance?  
+  
+## FTO / IRX3 example  
+
+The FTO / IRX3 loci springs to mind immediately as a potentially interesting pair of genes. We know that there is a significant BMI signal in the FTO gene, which actually changes the expression of the IRX3. I wonder what these eQTLs look like?  
+
+```{r}
+fto <- "ENSG00000140718"
+irx3 <- "ENSG00000177508"
+
+tmp1 <- cerebellum[substr(gene, start = 1, stop = 15) %in% c(fto, irx3)]
+tmp1[, pos := as.integer(strsplit(SNP, "_")[[1]][2]), by = "SNP"]
+colnames(tmp1) <- c("gene", "SNP", "beta", "tstat", "pvalue", "pos")
+
+library(ggplot2)
+
+ggplot(tmp1, aes(x = pos, y = -log10(pvalue))) +
+    geom_point(aes(colour = gene), alpha = 0.5) +
+    theme_minimal()
+```
+
+Perhaps this is a meaningless plot, given that this is the cerbellum. Smemo _et al_ (2014) that first published this IRX3 eQTL finding, reported that IRX3 expression was influenced in the hypothalamus of mice. Let's try this eQTL dataset...
+
+
+```{r}
+hypothalamus <- fread(sprintf(data_dir, "Brain_Hypothalamus_Analysis_cis-eQTLs.txt"))
+
+tmp2 <- hypothalamus[substr(gene, start = 1, stop = 15) %in% c(fto, irx3)]
+tmp2[, pos := as.integer(strsplit(SNP, "_")[[1]][2]), by = "SNP"]
+colnames(tmp2) <- c("gene", "SNP", "beta", "tstat", "pvalue", "pos")
+
+library(ggplot2)
+
+ggplot(tmp2, aes(x = pos, y = tstat**2)) +
+    geom_point(aes(colour = gene), alpha = 0.3) +
+    scale_colour_manual(values = c("dodgerblue", "magenta")) +
+    facet_wrap(~ gene, nrow = 2) +
+    theme_minimal()
+```
+
+What a shame, there isn't really anything here either. Of course, we don't know the BMI status of these samples - so this miht be why we aren't seeing anything particularly interesting.
+
+## Exploring eQTLs alongside Gene Expression  
+
+Perhaps this approach of simply 'looking at the eQTLs' is far too simple. It makes sense to be guided by gene expression levels as well. Let's look at this for IRX3:
+
+```{r}
+gtexFile <- sprintf(data_dir, "All_Tissue_Site_Details_Analysis.combined.rpkm.gct")
+gtex <- fread(gtexFile)
+gtex[1:5, 1:7, with = FALSE]
+
+dictFile <- sprintf(data_dir, "GTEx_Data_V6_Annotations_SampleAttributesDS.txt")
+dict <- fread(dictFile)
+dict <- dict[, .(SAMPID, SMTS, SMTSD)]
+head(dict)
+```
+
+```{r}
+setkey(dict, SAMPID)
+setkey(gtex, Description)
+
+
+getGeneProfile <- function (geneName = NULL) {
+    
+    sampleIDs <- colnames(gtex)[-c(1:2)]
+    profile <- dict[sampleIDs, .(SMTSD, SMTS)]
+    profile[, RPKM := t(gtex[geneName, -c(1, 2), with = FALSE])]
+    profile[, Gene := geneName]
+    
+    
+    return (profile)
+}
+
+showGenes <- c("IRX3")
+plotGenes <- rbindlist(lapply(showGenes, getGeneProfile))
+ggplot(plotGenes, aes(x = SMTSD, y = RPKM)) +
+    geom_boxplot() +
+    facet_wrap( ~ Gene, scales = "free_y") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "none")
+```
+
+Clearly, the expression of IRX3 is strongly tissue-dependent. We would assume therefore, that the pattern of eQTLs would also differ between tissues. Let's consider 5 of these tissues: Adipose (subcutaneous), Breast, Esophagus mucosa, Skin (lower leg), brain (cerebellum).
+
+Some of these files are really large, and even data.table isn't particularly happy with them (e.g. a 12 GB file!). IRX3 begins at row 84288863 in the cerebellum dataset, and similarly in the hypothalamus dataset. I am going to assume that this is the case for all datasets and skip the first 50,000,000 rows in each file.
+
+```{r}
+extract_gene <- function (lcl_gene, tissue) {
+    eQTL_file <- sprintf("%s_Analysis_cis-eQTLs.txt", tissue)
+    tmp <- fread(sprintf(data_dir, eQTL_file), skip = 50000000)
+    colnames(tmp) <- c("gene", "SNP", "beta", "tstat", "pvalue")
+    tmp <- tmp[gene == lcl_gene]
+    print(dim(tmp))    
+    tmp[, pos := as.integer(strsplit(SNP, "_")[[1]][2]), by = "SNP"]
+    tmp[, tissue := tissue]
+    
+    return (tmp)
+}
+tissues <- c("Adipose_Subcutaneous", "Breast_Mammary_Tissue", "Esophagus_Mucosa", "Skin_Sun_Exposed_Lower_leg",
+             "Brain_Cerebellum")
+irx3 <- rbindlist(lapply(tissues,
+                         function (t) extract_gene("ENSG00000177508.11", t)))
+```
+
+Lol - this took ages. Even when trimming down the number of rows read. This is not an interactive timescale - I need to get this data into a database asap I think.
+
+```{r}
+ggplot(irx3[abs(tstat) > 0.5], aes(x = pos, y = -log10(pvalue))) +
+    geom_point(colour = "dodgerblue", alpha = 0.3) +
+    facet_wrap(~ tissue, nrow = 5) +
+    theme_minimal()
+```
