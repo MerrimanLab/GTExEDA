@@ -11,60 +11,169 @@ Previously, we have explored some very simple visualisation of the GTEx gene exp
 
 Unfortunately, multivariate methods typically rely on the covariance matrix which is intractable at this data size (raw file ~ 4.7 GB). We culd pre-filter the data based on specific domain knowledge, but this would restrict our ability to detect potentially novel relationships. Instead, we will explore online (or incremental) machine learning algorithms to solve this problem. 
 
-There is just one problem... I can't find any R packages which provide online implementations of kmeans or principal components analysis etc. Python has some (see http://scikit-learn.org/stable/modules/scaling_strategies.html) - but I can't get python to even read the 4.7 GB file. Fail. 
+One solution is to use alternate centroid-centric methods of clustering, such as kmeans. The computational cost of kmeans is asymptotically O(kN), where k << N. This is clearly favourable over the O(N^2) costs of calculating a covariance matrix. Even so, the cost of kmeans grows quickly when N is large and as k increases thus, limiting the degree of k which may be fit. Our goals are to explore a) the solutions to mini-batch kmeans, b) the averaged solutions across all batches and c) whether the resulting centroids can be interpreted (perhaps through heirarchical clustering). In short, we hope that a mini-batch kmeans approach might be used to summarise a large dataset, and hope to show that this summary is biologically meaningful.
+
+## Test data  
+
+For this, we are going to work with the Creighton cancer dataset. Specifically, we will focus on the 799 "obesity signature genes". Whilst this is not a giant dataset, it is sufficiently large to explore and interrogate our goals.
 
 ```{r}
-setwd("~/Documents/GitHub/GTExEDA")
+setwd("~/Documents/GitHub/GTExEDA/")
 library(data.table)
+library(ggplot2)
 
-dataDir <- "/mnt/DataDrive/gEXPR_eQTL_Datasets/GTEXData/%s"
-gtexFile <- sprintf(dataDir, "GeneExpression/All_Tissue_Site_Details_Analysis.combined.rpkm.gct")
+# read in trait and expression data
+traits <- fread("~/Google Drive/Projects/ICAPlaypen/GSE24185_clinical.csv")
+expression <- read.table("~/Google Drive/Projects/ICAPlaypen/GSE24185_series_matrix.txt", sep = "", comment.char = "!", header = TRUE, row.names = 1)
+gene_names <- rownames(expression)
+expression <- data.table(expression)
 
-gtex <- fread(gtexFile)
-gtex[1:5, 1:7, with = FALSE]
+# filter to obesity-related genes
+obesity_genes <- readLines('~/Google Drive/Projects/ICAPlaypen/crobsgenes.txt')
+probes <- as.vector(na.omit(match(obesity_genes, gene_names)))
+expression <- as.matrix(expression[probes])   # note probes is a vector of row indices.
+
+# standardise (z-scores of gene expression)
+expression <- apply(expression, 1, function (x) (x - mean(x)) / sd(x))
+expression[expression < -3] <- 3
+expression[expression > 3] <- 3
+expression <- t(expression)
+
+# a quick look
+rownames(expression) <- gene_names[probes]
+dim(expression)
+head(expression[, 1:10])
 ```
 
-I have tried a whole lot of different libraries with no success. RMOA & stream I couldn't figure out how to work - dumb. Birdh is redundant and no longer available. The two issues I am having are:
+This dataset is small enough that we can apply basic clustering, for example a heatmap:
 
-  - in python I am not familiar enough with how to read in a file this large. If I could and i could chunk it out, then I could use MiniBatchKmeans.  
-  - using data.table I can easily read this in in R - so perhaps I simply implement my own mini batch kmeans, it can't be that hard!  
+```{r}
+orig.tree1 <- hclust(as.dist(1 - cor(t(expression), method = "spearman")))
+orig.tree2 <- hclust(dist(scale(expression)))
+
+par(mfrow = c(2, 1))
+plot(orig.tree1, labels = FALSE, xlab = NA, main = NULL)
+plot(orig.tree2, labels = FALSE, xlab = NA, main = NULL)
+par(mfrow = c(1, 1))
+```
+
+The dendrogram of the gene clusters is quite nice. Clearly, there is one clear cluster of genes on the left, and then at least 2 clusters on the right of the tree. Let's begin with 3 clusters intially.
+
+```{r}
+targets <- cutree(orig.tree2, 4)
+table(targets)
+```
+
+## Mini-batch kmeans  
+
+In a true mini-batch implementation, the cluster centers should evolve between batches. Here, we will simply create new centers and then plot them all at the end. Plan:  
+
+  - divide the dataset into 6 batches  
+  - perform kmeans, over fitting initially  
+  - plot the centroids from each run (require principal components to do this)  
   
-## Implementing mini-batch kmeans  
-
-Will use a training sample of 5000 genes to estimate the number of clusters...
 ```{r}
-idx_train <- sample(nrow(gtex), 5000)
-chunk1 <- gtex[idx_train, -c(1, 2), with = FALSE]
+batches <- sample(nrow(expression)) %% 9
+table(batches)
 
-#pca <- chunk1[, prcomp(.SD, scale = TRUE)]
-results <- lapply(seq(3, 30, 3), function (k) {
-    print(k)
-    ks <- chunk1[, kmeans(scale(.SD), k)]
+pca <- prcomp(expression, scale = FALSE, center = FALSE)
+
+par(mfrow = c(3, 3))
+
+centroids <- NULL
+for (l in unique(batches)) {
+    tmp <- expression[batches == l, ]
+    ks <- kmeans(tmp, 15)
+    lcl_centroids <- ks$centers %*% pca$rotation[, 1:10]
     
-    return (ks$tot.withinss)
-})
-plot(unlist(results)/1000000)
+    lcl_result <- as.data.frame(ks$centers)
+    lcl_result$batch_no <- l
+    if (is.null(centroids)) {
+        centroids <- lcl_result
+    } else {
+        centroids <- rbind(centroids, lcl_result)
+    }
+    
+    plot(pca$x[, 1:2], col = "grey", main = l)
+    points(lcl_centroids[, 1:2], col = "red")
+}
+par(mfrow = c(1, 1))
 ```
 
-Wow, there are waaaay fewer gene clusters than I would have thought. Although this is euclidean distance...
-
-Am now going to overfit the number of clusters, and will recluster the centroids later
+There is a lot of consistency in the centroid positions which is good to see. We can combine these all into one plot:
 
 ```{r}
-idx_chunks <- sample(nrow(gtex)) %% 10   # 10 chunks
-head(idx_chunks, 20)
-table(idx_chunks)
+plot(pca$x[, 1:2], col = "grey")
+points(as.matrix(centroids[, -ncol(centroids)]) %*% pca$rotation[, 1:2], col = "blue")
 ```
 
-Estimate the scaling factors & principcal components (this is for visualisation only, so no need to stress to much) from the first chunk, save these values.
+I quite like this, in that these centroids combined provide quite a good summary of the original data.
 
 ```{r}
-xs <- gtex[idx_chunks == 0, -c(1, 2), with = FALSE][, scale(.SD, center = TRUE, scale = TRUE)]
-xs.centers <- attr(xs, "scaled:center")
-xs.scale <- attr(xs, "scaled:scale")
-
-xs.pca <- gtex[idx_chunks == 0, -c(1, 2), with = FALSE][, prcomp(.SD, scale = TRUE)]
-summary(xs.pca)$importance[, 1:5]
+summary_clusters <- kmeans(centroids[, -ncol(centroids)], 4)
+points(summary_clusters$centers %*% pca$rotation[, 1:2], col = "red", pch = 19)
+text(summary_clusters$centers %*% pca$rotation[, 1:2] * 1.02, col = "red", labels = 1:4)
 ```
 
-Calculate initial centroids using the first chunk, and then incrementally update from then on...
+Visually, this appears to be a reasonably good summarisation of the original dataset. We overfit each batch, and then overfit the aggregate of all the batches to give us 20 summary values. There are definitely disadvantages to this, in that the resulting summary_clusters are quite variable depending on the particular kmeans run. However, we should be able to use these in a "nearest neighbour" type of approach.  
+
+Our 90 centroids (6 batches x 15 centers) have been reclustered into 10 groups, meaning that we can now assign cluster membership to each centroid and train a nearest neighbour type of model:
+
+```{r}
+centroids$cluster <- summary_clusters$cluster
+centroids$batch_no <- NULL
+head(centroids[, c(1:5, ncol(centroids))])
+```
+
+We can now train a nearest neighbour model, and use this to fit the original expression data:
+
+```{r}
+library(kknn)
+
+model <- train.kknn(factor(cluster) ~ ., data = centroids, ks = 10)
+table(centroids$cluster, fitted.values(model)[[1]])
+```
+
+This has done a spectacular job on the centroids. But how does it go on the expression data?
+
+```{r}
+predicted_clusters <- predict(model, as.data.frame(expression))
+
+plot(orig.tree2, labels = predicted_clusters)
+table(targets, predicted_clusters)
+```
+
+This isn't perfect - by a long shot. But the most important thing is that it has accurately identified the left-most cluster, those outlying genes that we were interested in. There is a lot of admixture in the larger group of genes, but at least they are well separated from the smaller group.
+
+We can see this visually in the following plot:
+
+```{r}
+plot(pca$x[, 1:2], col = "grey")
+points(as.matrix(centroids[, -ncol(centroids)]) %*% pca$rotation[, 1:2], col = "blue")
+
+points(summary_clusters$centers %*% pca$rotation[, 1:2], col = "red", pch = 19)
+text(summary_clusters$centers %*% pca$rotation[, 1:2] * 1.02, col = "red", labels = 1:4)
+```
+
+Cluster 3 is well separated from the others. And, I just boosted the number of nearest neighbours from 10 to 30 and it has done an even better job. There is some potential in this perhaps.
+
+## Final thoughts  
+
+What we have shown here, is that an averaged mini-batch approach to kmeans can do quite well at clustering this dataset. It isn't perfect by a long shot - but it does achieve the most important factor, which is it has separated the two obvious groups of genes - and this is what matters most here. I think that the uncertainty in the larger group is a good thing, and it reflects the fact that there is very little indpendent signal in this larger group.
+
+So, what have we done?  
+
+  1. over-clustered batches of the input data to construct a "summary" of each batch  
+  2. clustered these summaries to identify clusters  
+  3. showed that it picked up the strongest clusters in the data  
+  
+```{r}
+par(mfrow = c(2, 1))
+plot(orig.tree1, labels = FALSE, xlab = NA, main = NA)
+plot(hclust(as.dist(1 - cor(t(centroids[, -ncol(centroids)]), method = "spearman"))), xlab = NA, main = NA, labels = FALSE)
+par(mfrow=c(1,1))
+```
+  
+Why do we want to do this?  Because the data is too large to cluster in one go, so we cluster it in small batches, produce a summary and then predict cluster membership based on this summary. Based on the two plots above, this is analagous to pruning the dendrogram.
+
+We have shown that there are two clear groups - I need to simulate this to show that this also works when there are more than 2 clear groups, i.e. it should be able to pick up all clear clusters.
