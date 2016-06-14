@@ -8,46 +8,48 @@ output: html_document
 In GTEx_Online_Analysis_methods we showed that we could effectively summarise the data using mini-batch kmeans and still extract the strognest clustering structure from the data. Here we are going to explore this in more detail to see if it holds up on simulated datasets. We will focus on two-dimensional datasets, as these are easy to visualise.
 
 ```{r}
+setwd("~/Documents/GitHub/GTExEDA/")
 library(MASS)
 
-set.seed(101)
-
-simulate_cluster <- function (x_mu, y_mu, N, cov_m = matrix(c(1, 0.5, 0.5, 1), ncol = 2)) {
-    MASS::mvrnorm(n = N, mu = c(x_mu, y_mu), Sigma = cov_m * runif(4))
-}
-sim_2clusters <- rbind(simulate_cluster(1, 2, 100),
-                       simulate_cluster(5, -2, 500))
-sim_2clusters <- cbind(sim_2clusters, c(rep(1, 100), rep(2, 500)))
-
-sim_3clusters <- rbind(simulate_cluster(1, 3.5, 70),
-                       simulate_cluster(0, -2, 200),
-                       simulate_cluster(-2, 1, 150))
-sim_3clusters <- cbind(sim_3clusters, c(rep(1, 70), rep(2, 200), rep(3, 150)))
-                       
-sim_4clusters <- rbind(simulate_cluster(-1, -3, 40),
-                       simulate_cluster(-1, 2, 120),
-                       simulate_cluster(-2, 4, 110),
-                       simulate_cluster(4, 3, 80))
-sim_4clusters <- cbind(sim_4clusters, c(rep(1, 40), rep(2, 120), rep(3, 110), rep(4, 80)))
-
-sim_5clusters <- rbind(simulate_cluster(1, 10, 200),
-                       simulate_cluster(-1, -2, 200),
-                       simulate_cluster(6, 4, 50),
-                       simulate_cluster(3, 3, 230),
-                       simulate_cluster(1.5, -3, 100))
-sim_5clusters <- cbind(sim_5clusters, c(rep(1, 200), rep(2, 200), rep(3, 50), rep(4, 230), rep(5, 100)))
-
-par(mfrow = c(2, 2))
-
-plot(sim_2clusters, col = sim_2clusters[, 3])
-plot(sim_3clusters, col = sim_3clusters[, 3])
-plot(sim_4clusters, col = sim_4clusters[, 3])
-plot(sim_5clusters, col = sim_5clusters[, 3])
-
-par(mfrow = c(1, 1))
-
-sim_data <- list(sim2 = sim_2clusters, sim3 = sim_3clusters, sim4 = sim_4clusters, sim5 = sim_5clusters)
-save(sim_data, file = "simulated_clusters.Rdata")
+# set.seed(101)
+# 
+# simulate_cluster <- function (x_mu, y_mu, N, cov_m = matrix(c(1, 0.5, 0.5, 1), ncol = 2)) {
+#     MASS::mvrnorm(n = N, mu = c(x_mu, y_mu), Sigma = cov_m * runif(4))
+# }
+# sim_2clusters <- rbind(simulate_cluster(1, 2, 100),
+#                        simulate_cluster(5, -2, 500))
+# sim_2clusters <- cbind(sim_2clusters, c(rep(1, 100), rep(2, 500)))
+# 
+# sim_3clusters <- rbind(simulate_cluster(1, 3.5, 70),
+#                        simulate_cluster(0, -2, 200),
+#                        simulate_cluster(-2, 1, 150))
+# sim_3clusters <- cbind(sim_3clusters, c(rep(1, 70), rep(2, 200), rep(3, 150)))
+#                        
+# sim_4clusters <- rbind(simulate_cluster(-1, -3, 40),
+#                        simulate_cluster(-1, 2, 120),
+#                        simulate_cluster(-2, 4, 110),
+#                        simulate_cluster(4, 3, 80))
+# sim_4clusters <- cbind(sim_4clusters, c(rep(1, 40), rep(2, 120), rep(3, 110), rep(4, 80)))
+# 
+# sim_5clusters <- rbind(simulate_cluster(1, 10, 200),
+#                        simulate_cluster(-1, -2, 200),
+#                        simulate_cluster(6, 4, 50),
+#                        simulate_cluster(3, 3, 230),
+#                        simulate_cluster(1.5, -3, 100))
+# sim_5clusters <- cbind(sim_5clusters, c(rep(1, 200), rep(2, 200), rep(3, 50), rep(4, 230), rep(5, 100)))
+# 
+# par(mfrow = c(2, 2))
+# 
+# plot(sim_2clusters, col = sim_2clusters[, 3])
+# plot(sim_3clusters, col = sim_3clusters[, 3])
+# plot(sim_4clusters, col = sim_4clusters[, 3])
+# plot(sim_5clusters, col = sim_5clusters[, 3])
+# 
+# par(mfrow = c(1, 1))
+# 
+# sim_data <- list(sim2 = sim_2clusters, sim3 = sim_3clusters, sim4 = sim_4clusters, sim5 = sim_5clusters)
+# save(sim_data, file = "simulated_clusters.Rdata")
+load("simulated_clusters.Rdata")
 ```
 
 Obviously, each of thse simulated datasets can be easily clustered - they aren't large. But let's pretend that they are we are going to do the following:
@@ -85,7 +87,7 @@ cluster_centroids <- function (centroids, K) {
 }
 my_knn <- function (training, testing, N) {
     tmp <- kknn::train.kknn(factor(cluster) ~ ., data = training, ks = N)
-    testing <- as.data.frame(testing[, 1:2])
+    testing <- as.data.frame(testing[, -ncol(testing)])
     testing$cluster <- predict(tmp, testing)
     
     return (testing)
@@ -100,10 +102,15 @@ plot(elbow(centroids), type = "b")
 centroids <- cluster_centroids(centroids, 2)
 result <- my_knn(centroids, sim_data[["sim2"]], 10)
 
-par(mfrow = c(2, 1))
-plot(sim_data[["sim2"]], col = sim_data[['sim2']][, 3])
-plot(result[, 1:2],col = result[, 3])
+par(mfrow = c(2, 2))
+plot(hclust(dist(sim_data[["sim2"]][, 1:2])), main = NA, xlab = NA, labels = FALSE)
+plot(hclust(dist(centroids[, 1:2])), main = "centroids", xlab = NA, labels = FALSE)
+
+plot(sim_data[["sim2"]][, 1:2], col = sim_data[["sim2"]][, 3], xlab = NA, ylab = NA, main = "Simulated")
+plot(result[, 1:2],col = result[, 3], xlab = NA, ylab = NA, main = "Predicted")
 par(mfrow = c(1, 1))
+
+table(sim_data[["sim2"]][, 3], result$cluster)
 ```
 
 For sim3:
@@ -114,10 +121,15 @@ plot(elbow(centroids), type = "b")
 centroids <- cluster_centroids(centroids, 3)
 result <- my_knn(centroids, sim_data[["sim3"]], 5)
 
-par(mfrow = c(2, 1))
-plot(sim_data[["sim3"]], col = sim_data[['sim3']][, 3])
-plot(result[, 1:2],col = result[, 3])
+par(mfrow = c(2, 2))
+plot(hclust(dist(sim_data[["sim3"]][, 1:2])), main = NA, xlab = NA, labels = FALSE)
+plot(hclust(dist(centroids[, 1:2])), main = "centroids", xlab = NA, labels = FALSE)
+
+plot(sim_data[["sim3"]][, 1:2], col = sim_data[["sim3"]][, 3], xlab = NA, ylab = NA, main = "Simulated")
+plot(result[, 1:2],col = result[, 3], xlab = NA, ylab = NA, main = "Predicted")
 par(mfrow = c(1, 1))
+
+table(sim_data[["sim3"]][, 3], result$cluster)
 ```
 
 For sim4:
@@ -125,13 +137,18 @@ For sim4:
 ```{r}
 centroids <- minibatch_kmeans(sim_data[["sim4"]], 10, 5)
 plot(elbow(centroids), type = "b")
-centroids <- cluster_centroids(centroids, 3)
+centroids <- cluster_centroids(centroids, 4)
 result <- my_knn(centroids, sim_data[["sim4"]], 5)
 
-par(mfrow = c(2, 1))
-plot(sim_data[["sim4"]], col = sim_data[['sim4']][, 3])
-plot(result[, 1:2],col = result[, 3])
+par(mfrow = c(2, 2))
+plot(hclust(dist(sim_data[["sim4"]][, 1:2])), main = NA, xlab = NA, labels = FALSE)
+plot(hclust(dist(centroids[, 1:2])), main = "centroids", xlab = NA, labels = FALSE)
+
+plot(sim_data[["sim4"]][, 1:2], col = sim_data[["sim4"]][, 3], xlab = NA, ylab = NA, main = "Simulated")
+plot(result[, 1:2],col = result[, 3], xlab = NA, ylab = NA, main = "Predicted")
 par(mfrow = c(1, 1))
+
+table(sim_data[["sim4"]][, 3], result$cluster)
 ```
 
 For sim5:
@@ -139,11 +156,58 @@ For sim5:
 ```{r}
 centroids <- minibatch_kmeans(sim_data[["sim5"]], 10, 5)
 plot(elbow(centroids), type = "b")
-centroids <- cluster_centroids(centroids, 4)
+centroids <- cluster_centroids(centroids, 3)
 result <- my_knn(centroids, sim_data[["sim5"]], 5)
 
-par(mfrow = c(2, 1))
-plot(sim_data[["sim5"]], col = sim_data[['sim5']][, 3])
-plot(result[, 1:2],col = result[, 3])
+par(mfrow = c(2, 2))
+plot(hclust(dist(sim_data[["sim5"]][, 1:2])), main = NA, xlab = NA, labels = FALSE)
+plot(hclust(dist(centroids[, 1:2])), main = "centroids", xlab = NA, labels = FALSE)
+
+plot(sim_data[["sim5"]][, 1:2], col = sim_data[["sim5"]][, 3], xlab = NA, ylab = NA, main = "Simulated")
+plot(result[, 1:2],col = result[, 3], xlab = NA, ylab = NA, main = "Predicted")
 par(mfrow = c(1, 1))
+
+table(sim_data[["sim5"]][, 3], result$cluster)
 ```
+
+This works really well. The results can be a little variable - depends on the heuristics of kmeans. So they do need to be repeated a few times to detect a suitable elbow point and to get the final predictions. But a long-running average certainly gets us there.
+
+Finally, just to prove this one way or another, the Creighton set:
+
+```{r}
+library(data.table)
+expression <- read.table("~/Google Drive/Projects/ICAPlaypen/GSE24185_series_matrix.txt", sep = "", comment.char = "!", header = TRUE, row.names = 1)
+gene_names <- rownames(expression)
+expression <- data.table(expression)
+
+# filter to obesity-related genes
+obesity_genes <- readLines('~/Google Drive/Projects/ICAPlaypen/crobsgenes.txt')
+probes <- as.vector(na.omit(match(obesity_genes, gene_names)))
+expression <- as.matrix(expression[probes])   # note probes is a vector of row indices.
+
+# standardise (z-scores of gene expression)
+expression <- apply(expression, 1, function (x) (x - mean(x)) / sd(x))
+expression[expression < -3] <- 3
+expression[expression > 3] <- 3
+expression <- t(expression)
+
+# a quick look
+rownames(expression) <- gene_names[probes]
+dim(expression)
+head(expression[, 1:10])
+```
+
+And the run:
+
+```{r}
+centroids <- minibatch_kmeans(expression, 10, 5)
+plot(elbow(centroids), type = "b")
+centroids <- cluster_centroids(centroids, 3)
+result <- my_knn(centroids, expression, 5)
+
+plot(hclust(dist(expression)), main = NA, xlab = NA, labels = result$cluster)
+plot(hclust(dist(centroids[, -ncol(centroids)])), main = "centroids", xlab = NA, labels = centroids$cluster)
+
+```
+
+My interpretation of this is that there are really only two clusters - and I am happy that the centroid dendrogram is a reasonable summary of the top one.
