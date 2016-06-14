@@ -1,0 +1,149 @@
+---
+title: "EnsemblSummarisation"
+author: "Nick Burns"
+date: "14 June 2016"
+output: html_document
+---
+
+In GTEx_Online_Analysis_methods we showed that we could effectively summarise the data using mini-batch kmeans and still extract the strognest clustering structure from the data. Here we are going to explore this in more detail to see if it holds up on simulated datasets. We will focus on two-dimensional datasets, as these are easy to visualise.
+
+```{r}
+library(MASS)
+
+set.seed(101)
+
+simulate_cluster <- function (x_mu, y_mu, N, cov_m = matrix(c(1, 0.5, 0.5, 1), ncol = 2)) {
+    MASS::mvrnorm(n = N, mu = c(x_mu, y_mu), Sigma = cov_m * runif(4))
+}
+sim_2clusters <- rbind(simulate_cluster(1, 2, 100),
+                       simulate_cluster(5, -2, 500))
+sim_2clusters <- cbind(sim_2clusters, c(rep(1, 100), rep(2, 500)))
+
+sim_3clusters <- rbind(simulate_cluster(1, 3.5, 70),
+                       simulate_cluster(0, -2, 200),
+                       simulate_cluster(-2, 1, 150))
+sim_3clusters <- cbind(sim_3clusters, c(rep(1, 70), rep(2, 200), rep(3, 150)))
+                       
+sim_4clusters <- rbind(simulate_cluster(-1, -3, 40),
+                       simulate_cluster(-1, 2, 120),
+                       simulate_cluster(-2, 4, 110),
+                       simulate_cluster(4, 3, 80))
+sim_4clusters <- cbind(sim_4clusters, c(rep(1, 40), rep(2, 120), rep(3, 110), rep(4, 80)))
+
+sim_5clusters <- rbind(simulate_cluster(1, 10, 200),
+                       simulate_cluster(-1, -2, 200),
+                       simulate_cluster(6, 4, 50),
+                       simulate_cluster(3, 3, 230),
+                       simulate_cluster(1.5, -3, 100))
+sim_5clusters <- cbind(sim_5clusters, c(rep(1, 200), rep(2, 200), rep(3, 50), rep(4, 230), rep(5, 100)))
+
+par(mfrow = c(2, 2))
+
+plot(sim_2clusters, col = sim_2clusters[, 3])
+plot(sim_3clusters, col = sim_3clusters[, 3])
+plot(sim_4clusters, col = sim_4clusters[, 3])
+plot(sim_5clusters, col = sim_5clusters[, 3])
+
+par(mfrow = c(1, 1))
+
+sim_data <- list(sim2 = sim_2clusters, sim3 = sim_3clusters, sim4 = sim_4clusters, sim5 = sim_5clusters)
+save(sim_data, file = "simulated_clusters.Rdata")
+```
+
+Obviously, each of thse simulated datasets can be easily clustered - they aren't large. But let's pretend that they are we are going to do the following:
+
+  1. summarise each dataset using mini-btach kmeans  
+  2. assign cluster labels to each summary set  
+  3. train a KNN model on the summary set  
+  4. use this KNN model to predict the cluster membership of the original datasets  
+  
+```{r}
+minibatch_kmeans <- function (data, l_batches, K) {
+    batches <- sample(nrow(data)) %% l_batches
+    print(table(batches))
+
+    lcl_centroids <- NULL
+    for (l in 0:(l_batches - 1)) {
+        tmp <- data[batches == l, 1:2]
+        cluster_model <- kmeans(tmp, K)
+        print(table(cluster_model$cluster))
+        lcl_centroids <- if (is.null(lcl_centroids)) as.data.frame(cluster_model$centers)
+                         else rbind(lcl_centroids, as.data.frame(cluster_model$centers))
+    }
+    
+    return (lcl_centroids)
+}
+elbow <- function (data, max_k = 10) {
+    results <- lapply(1:max_k, function (k) {
+        kmeans(data, k)$tot.withinss / nrow(data)
+    })
+    return (unlist(results))
+}
+cluster_centroids <- function (centroids, K) {
+    centroids$cluster <- kmeans(centroids, K)$cluster
+    return (centroids)
+}
+my_knn <- function (training, testing, N) {
+    tmp <- kknn::train.kknn(factor(cluster) ~ ., data = training, ks = N)
+    testing <- as.data.frame(testing[, 1:2])
+    testing$cluster <- predict(tmp, testing)
+    
+    return (testing)
+}
+```
+
+For sim2:
+
+```{r}
+centroids <- minibatch_kmeans(sim_data[["sim2"]], 10, 5)
+plot(elbow(centroids), type = "b")
+centroids <- cluster_centroids(centroids, 2)
+result <- my_knn(centroids, sim_data[["sim2"]], 10)
+
+par(mfrow = c(2, 1))
+plot(sim_data[["sim2"]], col = sim_data[['sim2']][, 3])
+plot(result[, 1:2],col = result[, 3])
+par(mfrow = c(1, 1))
+```
+
+For sim3:
+
+```{r}
+centroids <- minibatch_kmeans(sim_data[["sim3"]], 10, 5)
+plot(elbow(centroids), type = "b")
+centroids <- cluster_centroids(centroids, 3)
+result <- my_knn(centroids, sim_data[["sim3"]], 5)
+
+par(mfrow = c(2, 1))
+plot(sim_data[["sim3"]], col = sim_data[['sim3']][, 3])
+plot(result[, 1:2],col = result[, 3])
+par(mfrow = c(1, 1))
+```
+
+For sim4:
+
+```{r}
+centroids <- minibatch_kmeans(sim_data[["sim4"]], 10, 5)
+plot(elbow(centroids), type = "b")
+centroids <- cluster_centroids(centroids, 3)
+result <- my_knn(centroids, sim_data[["sim4"]], 5)
+
+par(mfrow = c(2, 1))
+plot(sim_data[["sim4"]], col = sim_data[['sim4']][, 3])
+plot(result[, 1:2],col = result[, 3])
+par(mfrow = c(1, 1))
+```
+
+For sim5:
+
+```{r}
+centroids <- minibatch_kmeans(sim_data[["sim5"]], 10, 5)
+plot(elbow(centroids), type = "b")
+centroids <- cluster_centroids(centroids, 4)
+result <- my_knn(centroids, sim_data[["sim5"]], 5)
+
+par(mfrow = c(2, 1))
+plot(sim_data[["sim5"]], col = sim_data[['sim5']][, 3])
+plot(result[, 1:2],col = result[, 3])
+par(mfrow = c(1, 1))
+```
