@@ -66,7 +66,7 @@ minibatch_kmeans <- function (data, l_batches, K) {
 
     lcl_centroids <- NULL
     for (l in 0:(l_batches - 1)) {
-        tmp <- data[batches == l, 1:2]
+        tmp <- data[batches == l, ]
         cluster_model <- kmeans(tmp, K)
         print(table(cluster_model$cluster))
         lcl_centroids <- if (is.null(lcl_centroids)) as.data.frame(cluster_model$centers)
@@ -87,7 +87,7 @@ cluster_centroids <- function (centroids, K) {
 }
 my_knn <- function (training, testing, N) {
     tmp <- kknn::train.kknn(factor(cluster) ~ ., data = training, ks = N)
-    testing <- as.data.frame(testing[, -ncol(testing)])
+    testing <- as.data.frame(testing)
     testing$cluster <- predict(tmp, testing)
     
     return (testing)
@@ -97,10 +97,10 @@ my_knn <- function (training, testing, N) {
 For sim2:
 
 ```{r}
-centroids <- minibatch_kmeans(sim_data[["sim2"]], 10, 5)
+centroids <- minibatch_kmeans(sim_data[["sim2"]][, 1:2], 10, 5)
 plot(elbow(centroids), type = "b")
 centroids <- cluster_centroids(centroids, 2)
-result <- my_knn(centroids, sim_data[["sim2"]], 10)
+result <- my_knn(centroids, sim_data[["sim2"]][, 1:2], 10)
 
 par(mfrow = c(2, 2))
 plot(hclust(dist(sim_data[["sim2"]][, 1:2])), main = NA, xlab = NA, labels = FALSE)
@@ -116,10 +116,10 @@ table(sim_data[["sim2"]][, 3], result$cluster)
 For sim3:
 
 ```{r}
-centroids <- minibatch_kmeans(sim_data[["sim3"]], 10, 5)
+centroids <- minibatch_kmeans(sim_data[["sim3"]][, 1:2], 10, 5)
 plot(elbow(centroids), type = "b")
 centroids <- cluster_centroids(centroids, 3)
-result <- my_knn(centroids, sim_data[["sim3"]], 5)
+result <- my_knn(centroids, sim_data[["sim3"]][, 1:2], 5)
 
 par(mfrow = c(2, 2))
 plot(hclust(dist(sim_data[["sim3"]][, 1:2])), main = NA, xlab = NA, labels = FALSE)
@@ -135,10 +135,10 @@ table(sim_data[["sim3"]][, 3], result$cluster)
 For sim4:
 
 ```{r}
-centroids <- minibatch_kmeans(sim_data[["sim4"]], 10, 5)
+centroids <- minibatch_kmeans(sim_data[["sim4"]][, 1:2], 10, 5)
 plot(elbow(centroids), type = "b")
-centroids <- cluster_centroids(centroids, 4)
-result <- my_knn(centroids, sim_data[["sim4"]], 5)
+centroids <- cluster_centroids(centroids, 3)
+result <- my_knn(centroids, sim_data[["sim4"]][, 1:2], 5)
 
 par(mfrow = c(2, 2))
 plot(hclust(dist(sim_data[["sim4"]][, 1:2])), main = NA, xlab = NA, labels = FALSE)
@@ -154,10 +154,10 @@ table(sim_data[["sim4"]][, 3], result$cluster)
 For sim5:
 
 ```{r}
-centroids <- minibatch_kmeans(sim_data[["sim5"]], 10, 5)
+centroids <- minibatch_kmeans(sim_data[["sim5"]][, 1:2], 10, 5)
 plot(elbow(centroids), type = "b")
 centroids <- cluster_centroids(centroids, 3)
-result <- my_knn(centroids, sim_data[["sim5"]], 5)
+result <- my_knn(centroids, sim_data[["sim5"]][, 1:2], 5)
 
 par(mfrow = c(2, 2))
 plot(hclust(dist(sim_data[["sim5"]][, 1:2])), main = NA, xlab = NA, labels = FALSE)
@@ -171,6 +171,8 @@ table(sim_data[["sim5"]][, 3], result$cluster)
 ```
 
 This works really well. The results can be a little variable - depends on the heuristics of kmeans. So they do need to be repeated a few times to detect a suitable elbow point and to get the final predictions. But a long-running average certainly gets us there.
+
+## Test: Creighton dataset  
 
 Finally, just to prove this one way or another, the Creighton set:
 
@@ -205,9 +207,241 @@ plot(elbow(centroids), type = "b")
 centroids <- cluster_centroids(centroids, 3)
 result <- my_knn(centroids, expression, 5)
 
-plot(hclust(dist(expression)), main = NA, xlab = NA, labels = result$cluster)
+orig.tree <- hclust(dist(expression))
+plot(orig.tree, main = NA, xlab = NA, labels = result$cluster)
 plot(hclust(dist(centroids[, -ncol(centroids)])), main = "centroids", xlab = NA, labels = centroids$cluster)
 
+table(cutree(orig.tree, 3), result$cluster)
 ```
 
 My interpretation of this is that there are really only two clusters - and I am happy that the centroid dendrogram is a reasonable summary of the top one.
+
+## Test: VDV dataset  
+
+Stole this dataset from Mik's lectures...
+
+```{r}
+load("~/Downloads/STAT435-VDVdata.RData")
+
+head(vdv.genes[, 1:5])
+
+vdv.genes <- t(scale(t(vdv.genes)))
+# vdv.genes[vdv.genes > 3] <- 3
+# vdv.genes[vdv.genes < -3] <- -3
+
+#orig.tree <- hclust(as.dist(1 - cor(t(vdv.genes), method = "spearman")))
+orig.tree <- hclust(dist(vdv.genes))
+plot(orig.tree, labels = FALSE)
+```
+
+Well that is crazy complicated :) Where would you cut this? Perhaps 4 major clusters of genes? Maybe one level lower at ~ 10 clusters? Let's try the summary method.
+
+```{r}
+centroids <- minibatch_kmeans(vdv.genes, 10, 5)
+plot(elbow(centroids), type = "b")
+```
+
+Based on the elbow, we would probably say that 5 - 6 clusters is sufficient.
+
+```{r}
+centroids <- cluster_centroids(centroids, 5)
+result <- my_knn(centroids, vdv.genes, 30)
+
+plot(orig.tree, labels = result$cluster)
+plot(hclust(dist(centroids[, -ncol(centroids)])), main = "centroids", xlab = NA, labels = centroids$cluster)
+table(cutree(orig.tree, 5), result$cluster)
+```
+
+Damn - this one doesn't do quite as good a job. The labels are acutally a bit all over the place. The choice of nearest neighbours definitely has an impact, but do we really want to do a grid search to find the best value? This just looks a little pooh.
+
+## Test: VDV70 dataset  
+
+Stole this dataset from Mik's lectures...
+
+```{r}
+vdv70 <- fread("~/Downloads/vdv70.csv")
+labs <- vdv70[, V1]
+vdv70 <- as.matrix(vdv70[, -1, with = FALSE])
+rownames(vdv70) <- labs
+
+vdv70 <- vdv70[2:nrow(vdv70), ]
+head(vdv70[, 1:5])
+
+orig.tree.euclid <- hclust(dist(vdv70))
+orig.tree.cor <- hclust(as.dist(1 - cor(t(vdv70))))
+
+par(mfrow = c(2, 1))
+plot(orig.tree.euclid, main = NA, xlab = NA, cex = 0.5)
+plot(orig.tree.cor, main = NA, xlab = NA, cex = 0.5)
+par(mfrow=c(1, 1))
+```
+
+Note the extreme differences between these two distance measures. There are really no clear division in the correlation dendrogram. This needs to really be explored. To build the summary, we will shoot high and go wtih 10 clusters per block:
+
+```{r}
+centroids <- minibatch_kmeans(vdv70, 5, 7)
+plot(elbow(centroids), type = "b")
+```
+
+Really hard to tell from the elbow, but let's just choose 4 clusters and see what happens.
+
+```{r}
+K = 4
+centroids <- cluster_centroids(centroids, K)
+result <- my_knn(centroids, vdv70, 5)
+
+table(cutree(orig.tree.cor, K))
+table(cutree(orig.tree.cor, K), result$cluster)
+plot(orig.tree.cor, labels = result$cluster)
+
+table(cutree(orig.tree.euclid, K))
+table(cutree(orig.tree.euclid, K), result$cluster)
+plot(orig.tree.euclid, labels = result$cluster)
+```
+
+This result really shows the difference between the euclidean and correlation distances. The ensemble did an ok job of returning the euclid clusters, but did poorly on the correlation clusters. More than this though, I am not really all that convinced that there are any clusters in this data!
+
+```{r}
+par(mfrow = c(2, 2))
+plot(prcomp(vdv70, scale = FALSE)$x[, 1:2], main = "vdv70")
+plot(prcomp(vdv70, scale = TRUE)$x[, 1:2], main = "vdv70")
+plot(prcomp(vdv.genes)$x[, 1:2], main = "vdv genes")
+plot(prcomp(expression)$x[, 1:2], main = "creighton")
+par(mfrow=c(1,1))
+```
+
+These plots are now interesting. The Creighton dataset displays two clear clusters in the first two PCs. The other datasets exhibit no clear clusters. So perhaps, the dodgy results above can be explained, and the real issue is first of all to detect whether there are meaningful clusters.
+
+## Test: Myc expression data
+
+The myc expression dataset has gene expression data for 20 samples, 10 wildtype and 10 mutant. The gene expression data should cluster by sample type.
+
+```{r}
+load("~/Downloads/myc-expData.RData")
+dim(mat.rma)
+head(mat.rma)
+
+# xtract top 500 genes
+mat.rma <- mat.rma[match(rownames(tt)[1:500], rownames(mat.rma)),]
+
+myc <- mat.rma
+plot(prcomp(myc, scale = TRUE)$x[, 1:2])
+```
+
+Clearly there are 2 groups of genes at least here - with the odd outlier. Let's look at a heatmap:
+
+```{r}
+heatmap(myc, labRow = NA)
+```
+
+This is a nice dataset, as there appears to be some really nice clustering. Here, two dendrograms of the gene clusters:
+
+```{r}
+myc.cor.tree <- hclust(as.dist(1 - cor(t(myc), method = "spearman")))
+myc.euclid.tree <- hclust(dist(scale(myc)))
+
+par(mfrow = c(2, 1))
+
+plot(myc.cor.tree, main = NA, xlab = NA, labels = FALSE)
+plot(myc.euclid.tree, main = NA, xlab = NA, labels = FALSE)
+
+par(mfrow = c(1, 1))
+```
+
+Once again, it is certainly worth noting that the clustering outcomes are definitely affected by the distance measure. In the correlation-based method we can clearly see two groups of genes. These are very likely "wildtype" and "mutant" groups. In the euclidean-based method there are possibly 3 clusters (but we need to go with 4 because of the 3 annoying outliers). Let's look a little closer at these:
+
+```{r}
+groups.cor <- cutree(myc.cor.tree, 2)
+groups.euclid <- cutree(myc.euclid.tree, 4)
+
+par(mfrow = c(2, 2))
+
+plot(myc.cor.tree, main = NA, xlab = NA, labels = FALSE)
+plot(prcomp(myc, scale = TRUE)$x[, 1:2], col = groups.cor)
+
+plot(myc.euclid.tree, main = NA, xlab = NA, labels = FALSE)
+plot(prcomp(myc, scale = TRUE)$x[, 1:2], col = groups.euclid)
+
+par(mfrow = c(1, 1))
+```
+
+The gene clustering is crystal clear in the correlation-based results, but not so in the euclidean-based results. Without a doubt - this is a critically important distinction. The euclidean-based clusters are clearly NOT representative of the biology. This is somewhat irrelvant though, as long as we can reproduce the correlation-based clusters at the end. Let's go...
+
+```{r}
+centroids <- minibatch_kmeans(myc, 5, 7)
+plot(elbow(centroids), type = "b")
+```
+
+So far, this looks like the euclidean results - no surprise there. Let's select 4 clusters:
+
+```{r}
+K = 4
+centroids <- cluster_centroids(centroids, K)
+result <- my_knn(centroids, myc, 5)
+
+table(cutree(myc.cor.tree, 2))
+table(cutree(myc.cor.tree, 2), result$cluster)
+plot(myc.cor.tree, labels = result$cluster)
+
+table(cutree(myc.euclid.tree, K))
+table(cutree(myc.euclid.tree, K), result$cluster)
+plot(myc.euclid.tree, labels = result$cluster)
+```
+
+Absolutely no doubt about that - we can reproduce the euclidean clusters well, but not the correlation clusters. There is one other option here though, that I haven't explored yet: can we perform heirarchical clustering on centroids? And if so, then surely we could calculate a correlation-distance for each gene to the nearest centroid?
+
+```{r}
+centroid.tree <- hclust(as.dist(1 - cor(t(centroids[, -ncol(centroids)]), method = "spearman")))
+par(mfrow = c(2, 1))
+plot(myc.cor.tree, main = NA, xlab = NA, labels = FALSE)
+plot(centroid.tree, main = NA, xlab = NA)
+par(mfrow = c(1, 1))
+```
+
+Boom - we have two clear clusters. Happy with this so far. So now, can we calculate a correlation-distance for each gene to each centroid? Let's expreiment with some random gene (gene 11 here):
+
+```{r}
+tmp_gene <- myc[11, ]
+rx <- sort(apply(centroids, 1, function (x) cor(x[-ncol(centroids)], tmp_gene, method = "spearman")), decreasing = TRUE)
+head(rx)
+```
+
+This is great, gene 11 correlates well with centroids in the right hand cluster, and poorly with the others. If I loop through them all now, I should be able to 'predict' the most likely cluster:
+
+```{r}
+correlated_clusters <- cutree(centroid.tree, 2)
+
+get_cluster <- function (x) {
+    correlations <- apply(centroids, 1, function (c) cor(c[-length(c)], x, method = "spearman"))
+    tmp_centroid <- names(which.max(correlations))
+
+    return (correlated_clusters[[tmp_centroid]])
+}
+predicted_clusters <- apply(myc, 1, get_cluster)
+table(groups.cor, predicted_clusters)
+
+par(mfrow = c(2, 1))
+plot(prcomp(myc, scale = TRUE)$x[, 1:2], col = groups.cor)
+plot(prcomp(myc, scale = TRUE)$x[, 1:2], col = predicted_clusters)
+par(mfrow = c(1, 1))
+```
+
+BOOM!!!! Perfect prediction :) This rocks! I've nailed it.
+
+## Summary
+
+Here is the process. Given data too large to cluster in one hit:  
+
+  1. divide the data into 'L' batches  
+  2. overfit each batch, returning K centroids which represent a 'summary' of the data in this batch  
+  3. combine all 'L'x'K' summaries and treat this as an overall summary of the dataset  
+  4. Use heirarchical clustering to cluster this 'L'x'K' summary and cut the tree as appropriate  
+  5. Loop through all 'N' observations in your dataset:  
+      - calculate the correlation with each centroid in the summary  
+      - assign to the cluster with the strongest correlation  
+      
+Steps 1 - 3 yield a "euclidean"-representation of the dataset. However, this is fine. It is steps 5 & 6 which allow us to then turn this into an equivalent "correlation"-representation and thus, one that is biologically relevant.
+
+## Possible improvements:  
+
+Intuitively, k-nearest neighbours would most like provide a less-biased approach. If we are content with a "euclidean-based" representation of clusters, then we can train a kknn model as we have done on the simulated sets. This enforces a Euclidean distance measure in determining the "nearest" neighbours. However, if we want to measure the correlation-distance, then we could do as above and then take the majority vote from the top K results.
